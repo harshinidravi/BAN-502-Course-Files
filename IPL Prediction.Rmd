@@ -1,0 +1,362 @@
+# Indian Premiere League Analysis
+
+```{r}
+library(tidyverse)
+library(esquisse)
+library(ggplot2)
+library(scales)
+library(gt)
+library(gtExtras)
+library(tidytext)
+library(wesanderson)
+library(dplyr)
+library(tibble)
+library(elo)
+library(forstringr)
+library(reactable)
+```
+
+# Data Preparation
+
+```{r}
+matches <- read.csv("Matches.csv")
+ball_by_ball <- read.csv("Ball-by-Ball.csv")
+
+#Joining both the dataframes using id
+ipl = matches %>% inner_join(ball_by_ball, by ="id")
+
+#Converting batsman_runs from string to integer
+ipl$batsman_runs = as.numeric(ipl$batsman_runs)
+
+#Creating a variable season by extracting year from date
+ipl = ipl %>% mutate(season = str_left(date, 4))
+ipl = ipl %>% mutate(season = strtoi(season))
+
+#Renaming teams "Delhi Daredevils" to "Delhi Capitals" & "Deccan Chargers" to "Sunrisers Hyderabad" since only the team names have changed over the seasons to avoid miscalculations.
+
+ipl['bowling_team'][ipl['bowling_team'] == 'Delhi Daredevils'] <- 'Delhi Capitals'
+ipl['bowling_team'][ipl['bowling_team'] == 'Deccan Chargers'] <- 'Sunrisers Hyderabad'
+ipl['batting_team'][ipl['batting_team'] == 'Delhi Daredevils'] <- 'Delhi Capitals'
+ipl['batting_team'][ipl['batting_team'] == 'Deccan Chargers'] <- 'Sunrisers Hyderabad'
+
+matches['team1'][matches['team1'] == 'Delhi Daredevils'] <- 'Delhi Capitals'
+matches['team1'][matches['team1'] == 'Deccan Chargers'] <- 'Sunrisers Hyderabad'
+matches['team2'][matches['team2'] == 'Delhi Daredevils'] <- 'Delhi Capitals'
+matches['team2'][matches['team2'] == 'Deccan Chargers'] <- 'Sunrisers Hyderabad'
+matches['toss_winner'][matches['toss_winner'] == 'Delhi Daredevils'] <- 'Delhi Capitals'
+matches['toss_winner'][matches['toss_winner'] == 'Deccan Chargers'] <- 'Sunrisers Hyderabad'
+matches['winner'][matches['winner'] == 'Delhi Daredevils'] <- 'Delhi Capitals'
+matches['winner'][matches['winner'] == 'Deccan Chargers'] <- 'Sunrisers Hyderabad'
+
+#Filtering out matches & teams who played less than 2 seasons
+matches <- filter(matches, team1 != "Gujarat Lions")
+matches <- filter(matches, team1 != "Rising Pune Supergiant")
+matches <- filter(matches, team1 != "Pune Warriors")
+matches <- filter(matches, team1 != "Rising Pune Supergiants")
+matches <- filter(matches, team1 != "Kochi Tuskers Kerala")
+matches <- filter(matches, team1 != "NA")
+matches <- filter(matches, team2 != "Gujarat Lions")
+matches <- filter(matches, team2 != "Rising Pune Supergiant")
+matches <- filter(matches, team2 != "Pune Warriors")
+matches <- filter(matches, team2 != "Rising Pune Supergiants")
+matches <- filter(matches, team2 != "Kochi Tuskers Kerala")
+matches <- filter(matches, team2 != "NA")
+matches <- filter(matches, winner != "NA")
+```
+
+# Identifying Top 3 Batsmen in Each Team for Season 2020
+
+```{r}
+topbatsmen = ipl %>% group_by(batsman,batting_team,season) %>% summarise(batsmanRuns = sum(batsman_runs))
+topbatsmen <- topbatsmen [order(-topbatsmen$season, topbatsmen$batting_team, -topbatsmen$batsmanRuns),]
+topbatsmen <- filter(topbatsmen, season == "2020")
+topbatsmen1 <- topbatsmen %>%  group_by(batting_team) %>%  top_n(3, batsmanRuns)
+```
+
+# Plot for Top 3 Batsmen in Each Team by Runs for Season 2020
+
+```{r}
+ggplot(topbatsmen1) + aes(x = batsman, y = batsmanRuns, fill = batting_team) + geom_col() + scale_fill_hue(direction = 1) +
+ labs(x = "Batsman", y = "Total Runs", title = "Top 3 Batsmen in Each Team by Runs", subtitle = "Season 2020", fill = "Team") +
+ coord_flip() + theme_light() + theme(legend.position = "top")
+```
+
+# Top Runs Scorers Plot
+
+```{r}
+plot1 <- topbatsmen1[order(-topbatsmen1$batsmanRuns),]
+plot1 <- filter(plot1, batsmanRuns > "500")
+ggplot(plot1) + aes(x = batsman, y = batsmanRuns, fill = batting_team) +
+ geom_col() + geom_label(label= plot1$batsmanRuns)+
+ scale_fill_viridis_d(option = "cividis", direction = 1) +
+ labs(x = "Batsman", y = "Total Runs scored", title = "Top Runs Scorers") +
+ theme_minimal()
+```
+
+# Identifying Match-ups for Top Batsmen
+
+```{r}
+batmatchups = ipl %>% group_by(batsman,bowler) %>% summarise(batsmanRuns = sum(batsman_runs))
+batmatchups <- batmatchups [order(-batmatchups$batsmanRuns),]
+
+#Joining topbatsmen1 dataframe with matchups dataframe using batsmen
+bats_matchup = topbatsmen1 %>% inner_join(batmatchups, by ="batsman")
+bats_matchup = bats_matchup %>% select(batsman, batting_team, bowler, batsmanRuns.y)
+bats_matchup <- bats_matchup [order(-bats_matchup$batsmanRuns.y),]
+bats_matchup <- bats_matchup %>%  group_by(batsman) %>%  top_n(3, batsmanRuns.y)
+```
+
+```{r}
+bats_matchup <- bats_matchup [order(bats_matchup$batsman),]
+
+bats_matchup %>% select(c(batsman, batting_team, bowler, batsmanRuns.y)) %>% reactable(defaultColDef = colDef(align = "center"), columns = list(batsman = colDef(name="Batsman"), batting_team = colDef(name="Batting Team"), bowler = colDef(name="Bowler"), batsmanRuns.y = colDef(name="Runs")))
+```
+
+# Identifying Top 3 Bowlers in Each Team
+
+```{r}
+topbowler <- filter(ipl, dismissal_kind != "NA")
+topbowler <- topbowler %>% group_by(bowler) %>%   summarise(wickets=n(), .groups = 'drop')
+
+ipl2 <- ipl [order(ipl$bowler, -ipl$season),] 
+ipl2 <- as.data.frame(ipl2)
+ipl2 <- ipl2 %>% distinct(bowler, .keep_all = TRUE)
+topbowler1 = topbowler %>% inner_join(ipl2, by ="bowler")
+topbowler1 = topbowler1 %>% select(bowler, bowling_team, wickets)
+topbowler1 <- topbowler1 [order(-topbowler1$wickets),]
+topbowler1 <- topbowler1 %>%  group_by(bowling_team) %>%  top_n(3, wickets)
+
+#Removing teams played less than 2 seasons
+topbowler1 <- filter(topbowler1, bowling_team != "Gujarat Lions")
+topbowler1 <- filter(topbowler1, bowling_team != "Rising Pune Supergiant")
+topbowler1 <- filter(topbowler1, bowling_team != "Pune Warriors")
+topbowler1 <- filter(topbowler1, bowling_team != "Rising Pune Supergiants")
+topbowler1 <- filter(topbowler1, bowling_team != "Kochi Tuskers Kerala")
+topbowler1 <- filter(topbowler1, bowling_team != "NA")
+```
+
+# Identifying Match-ups for Bowlers
+
+```{r}
+matchups_bowler = ipl %>% group_by(bowler,batsman) %>% summarise(wickets = sum(is_wicket))
+matchups_bowler = filter(matchups_bowler, wickets != "0")
+matchups_bowler <- matchups_bowler [order(-matchups_bowler$wickets),]
+
+#Joining topbowler1 dataframe with matchups_bowler dataframe using bowler
+bowler_matchup = topbowler1 %>% inner_join(matchups_bowler, by ="bowler")
+bowler_matchup = bowler_matchup %>% select(bowler, bowling_team, batsman, wickets.y)
+bowler_matchup1 = bowler_matchup %>% inner_join(topbatsmen1, by ="batsman")
+bowler_matchup1 <- bowler_matchup1 [order(-bowler_matchup1$wickets.y, bowler_matchup1$bowler),]
+bowler_matchup1 <- bowler_matchup1 %>%  group_by(bowler) %>%  top_n(3, wickets.y)
+```
+
+```{r}
+bowler_matchup1 <- bowler_matchup1 [order(bowler_matchup1$bowler),]
+
+bowler_matchup1 %>% select(c(bowler, bowling_team, batsman, wickets.y)) %>% reactable(defaultColDef = colDef(align = "center"), columns = list(bowler = colDef(name="Bowler"), bowling_team = colDef(name="Bowling Team"), batsman = colDef(name="Batsman"), wickets.y = colDef(name="Total Dismissals")))
+
+```
+
+# Top Wicket Takers
+
+```{r}
+plot2 <- topbowler1[order(-topbowler1$wickets),]
+plot2 <- filter(plot2, wickets > 150)
+
+ggplot(plot2) + aes(x = bowler, y = wickets, fill = bowling_team) +
+ geom_col() + scale_fill_brewer(palette = "Purples", direction = 1) +
+ coord_flip() + geom_text(aes(label = wickets), hjust = 0.25)+
+ labs(x = "Bowler", y = "Total Wickets", title = "Top Wicket Takers") +
+ theme_minimal()
+```
+
+
+# Win Probability using ELO
+
+```{r}
+# Creating a new data frame to hold only Unique teams
+teams = data.frame(team = unique(c(matches$team1, matches$team2)))
+
+# Number of matches played by each team
+played1 <- matches %>%  group_by(team1) %>%  summarize(count1 = n()) %>%
+  arrange(team1) %>%  rename(team = team1)
+
+played2 <- matches %>%  group_by(team2) %>%  summarize(count2 = n()) %>%
+  arrange(team2) %>%  rename(team = team2)
+
+matches_team <- played1 %>%  full_join(played2, by = "team") %>%
+  mutate(n_matches_played = count1 + count2) %>%
+  select(team, n_matches_played) %>% arrange(desc(n_matches_played))
+matches_team
+
+matches_team %>%  ggplot(aes(team, n_matches_played, fill = team)) +
+  geom_col(show.legend = FALSE) +  coord_flip() +
+  geom_text(aes(label = n_matches_played), hjust = 0.25)+
+  labs(title="Number of Matches Played by Each Team", x= "Team Names", y = "Number of Matches Played")
+```
+# Identifying number of matches won by each team
+
+```{r}
+plot <- matches %>% select(winner) 
+plot <- plot %>% group_by(winner) %>% summarise(matches_won=n(),
+            .groups = 'drop')
+plot <- plot[order(-plot$matches_won),]
+
+plot %>%  ggplot(aes(winner, matches_won, fill = winner)) +
+  geom_col(show.legend = FALSE) +  coord_flip() +
+  geom_text(aes(label = matches_won), hjust = 0.25)+
+  labs(title="Number of Matches Won by Each Team", x= "Team Names", y = "Number of Matches Won")
+```
+
+
+```{r}
+#Assigning initial ratings to all teams as 1,500
+teams = teams %>% mutate(elo = 1500)
+matches = matches %>% mutate(resultPoint = if_else(team1 == winner, 1, if_else(team2 == winner, 0, 0.5)))
+matches <- matches %>% drop_na(resultPoint)
+matches1 = matches %>% select(date, team1, team2, winner, resultPoint) %>% arrange(date)
+
+for (i in seq_len(nrow(matches1))) {
+  match = matches1[i, ]
+  
+  # Pre-match ratings
+  teamA_elo = subset(teams, team == match$team1)$elo 
+  teamB_elo = subset(teams, team == match$team2)$elo
+  # Let's update our ratings
+  new_elo = elo.calc(wins.A = match$resultPoint, 
+                     elo.A = teamA_elo, 
+                     elo.B = teamB_elo,
+                     k = 30)
+  
+  # The results come back as a data.frame
+  # with team A's new rating in row 1 / column 1 
+  # and team B's new rating in row 1 / column 2 
+  teamA_new_elo = new_elo[1, 1]
+  teamB_new_elo = new_elo[1, 2]
+  
+  # We then update the ratings for teams A and B 
+  # and leave the other teams as they were
+  teams = teams %>%
+    mutate(elo = if_else(team == match$team1, teamA_new_elo,
+                         if_else(team == match$team2, teamB_new_elo, elo)))
+}
+teams %>%  arrange(-elo) %>%  head
+
+teams %>% ggplot(aes(team, elo, fill = team)) + geom_col(show.legend = FALSE) +
+  coord_flip() + geom_text(aes(label = elo), hjust = 0.25)+
+  labs(title="ELO Score of Each Team after 13 Seasons", x= "Team Names", y = "ELO Score")
+```
+
+```{r}
+Mumbai_Indians <- subset(teams, team == "Mumbai Indians")$elo 
+Chennai_Super_Kings <- subset(teams, team == "Chennai Super Kings")$elo
+Kolkata_Knight_Riders <- subset(teams, team == "Kolkata Knight Riders")$elo 
+Delhi_Capitals <- subset(teams, team == "Delhi Capitals")$elo
+Sunrisers_Hyderabad <- subset(teams, team == "Sunrisers Hyderabad")$elo 
+Rajasthan_Royals <- subset(teams, team == "Rajasthan Royals")$elo
+Kings_XI_Punjab <- subset(teams, team == "Kings XI Punjab")$elo 
+Royal_Challengers_Bangalore <- subset(teams, team == "Royal Challengers Bangalore")$elo
+
+runs = 1000 #number of simulations to run
+
+game = function(team1,team2,team1name,team2name){
+  prob = elo.prob(team1, team2)
+  rand = runif(1)
+  winner = ifelse(prob > rand, team1name, team2name)
+}
+
+set.seed(123)
+csk_srh = replicate(runs,game(Chennai_Super_Kings,Sunrisers_Hyderabad,"Chennai Super Kings","Sunrisers Hyderabad"),simplify=FALSE) %>%
+  do.call(rbind.data.frame,.)
+
+set.seed(123)
+csk_rcb = replicate(runs,game(Chennai_Super_Kings,Royal_Challengers_Bangalore,"Chennai Super Kings","Royal Challengers Bangalore"),simplify=FALSE) %>%  do.call(rbind.data.frame,.)
+
+set.seed(123)
+csk_rr = replicate(runs,game(Chennai_Super_Kings,Rajasthan_Royals,"Chennai Super Kings","Rajasthan Royals"),simplify=FALSE) %>%
+  do.call(rbind.data.frame,.)
+
+set.seed(123)
+csk_mi = replicate(runs,game(Chennai_Super_Kings,Mumbai_Indians,"Chennai Super Kings","Mumbai Indians"),simplify=FALSE) %>%
+  do.call(rbind.data.frame,.)
+
+set.seed(123)
+csk_kkr = replicate(runs,game(Chennai_Super_Kings,Kolkata_Knight_Riders,"Chennai Super Kings","Kolkata Knight Riders"),simplify=FALSE) %>%
+  do.call(rbind.data.frame,.)
+
+set.seed(123)
+csk_kxp = replicate(runs,game(Chennai_Super_Kings,Kings_XI_Punjab,"Chennai Super Kings","Kings XI Punjab"),simplify=FALSE) %>%
+  do.call(rbind.data.frame,.)
+
+set.seed(123)
+csk_dc = replicate(runs,game(Chennai_Super_Kings,Delhi_Capitals,"Chennai Super Kings","Delhi Capitals"),simplify=FALSE) %>%
+  do.call(rbind.data.frame,.)
+
+csk_league = bind_cols(csk_srh,csk_rcb,csk_rr,csk_mi,csk_kkr,csk_kxp,csk_dc)
+
+head(csk_srh)
+head(csk_rcb)
+head(csk_rr)
+head(csk_mi)
+head(csk_kkr)
+head(csk_kxp)
+head(csk_dc)
+
+csk_league = csk_league %>%
+  rename(csk_srh =  c..Chennai.Super.Kings....Sunrisers.Hyderabad....Chennai.Super.Kings...) %>%
+  rename(csk_rcb = c..Chennai.Super.Kings....Royal.Challengers.Bangalore....Chennai.Super.Kings...) %>%
+  rename(csk_rr = c..Chennai.Super.Kings....Rajasthan.Royals....Chennai.Super.Kings...) %>%
+  rename(csk_mi = c..Chennai.Super.Kings....Mumbai.Indians....Mumbai.Indians...) %>%
+  rename(csk_kkr = c..Chennai.Super.Kings....Kolkata.Knight.Riders....Chennai.Super.Kings...) %>%
+  rename(csk_kxp = c..Chennai.Super.Kings....Kings.XI.Punjab....Chennai.Super.Kings...) %>%
+  rename(csk_dc = c..Chennai.Super.Kings....Delhi.Capitals....Chennai.Super.Kings...)
+  
+head(csk_league)
+
+table(csk_league$csk_srh)
+table(csk_league$csk_rcb)
+table(csk_league$csk_rr)
+table(csk_league$csk_mi)
+table(csk_league$csk_kkr)
+table(csk_league$csk_kxp)
+table(csk_league$csk_dc)
+```
+
+# Impact Players
+
+```{r}
+IP <- ipl %>% select(id, team1, team2, batsman, batsman_runs, batting_team, bowler, dismissal_kind, bowling_team,season)
+
+#Assigning Impact Points for Batsman for the runs scored. Each Runs will get 1 point with double point option for 6 runs.
+IP <- IP %>%  mutate(batting_points = case_when(batsman_runs == 0 ~ 0, batsman_runs == 1 ~ 1,
+  batsman_runs == 2 ~ 2,  batsman_runs == 4 ~ 4, batsman_runs == 6 ~ 12))
+
+#Assigning Impact Points for Bowlers for wickets taken. Each wicket is worth 30 points expect for Runs outs & Retired Hurt as it is not applicable to an individual bowler.
+IP <- IP %>% mutate(bowling_points = case_when(dismissal_kind == "NA" ~ 0, dismissal_kind == "caught" ~ 30, dismissal_kind == "lbw" ~ 30, dismissal_kind == "caught and bowled" ~ 30, dismissal_kind == "bowled" ~ 30, dismissal_kind == "stumped" ~ 30, dismissal_kind == "run out" ~ 0, dismissal_kind == "retired hurt" ~ 0))
+
+```
+
+
+#Impact Players - Batsman
+
+```{r}
+# For batting:
+IP_batting <- IP %>% select(id, team1, team2, batsman, batting_points, batting_team, season)
+IP_batting <- filter(IP_batting, season >= "2018")
+IP_batting <- IP_batting %>% group_by(id, season, team1, team2, batting_team, batsman) %>% summarise(batting_points = sum(batting_points))
+IP_batting1 <- IP_batting %>%  group_by(batting_team, id) %>%  top_n(1, batting_points)
+IP_batting1 <- IP_batting1 %>% group_by(season, batting_team) %>% filter(batting_points == max(batting_points, na.rm = TRUE))
+
+IP_batting1 %>% select(c(id, season, team1, team2, batsman, batting_team, batting_points)) %>% reactable(defaultColDef = colDef(align = "center"), columns = list(id = colDef(name="ID"), season = colDef(name="Season"), team1 = colDef(name="Home Team"), team2 = colDef(name="Away Team"), batsman = colDef(name="Batsman"), batting_team = colDef(name="Batting Team"), batting_points = colDef(name="Points")))
+```
+
+#Impact Players - Bowler
+```{r}
+IP_bowling <- IP %>% select(id, team1, team2, bowler,bowling_points, bowling_team, season)
+IP_bowling <- filter(IP_bowling, bowling_points != "NA")
+IP_bowling <- filter(IP_bowling, season >= "2018")
+IP_bowling <- IP_bowling %>% group_by(id, season, team1, team2, bowling_team, bowler) %>% summarise(bowling_points = sum(bowling_points))
+IP_bowling1 <- IP_bowling %>%  group_by(bowling_team, id) %>%  top_n(1, bowling_points)
+IP_bowling1 <- IP_bowling1 %>% group_by(season, bowling_team) %>% filter(bowling_points == max(bowling_points, na.rm = TRUE))
+IP_bowling1 %>% select(c(id, season, team1, team2, bowler, bowling_team, bowling_points)) %>% reactable(defaultColDef = colDef(align = "center"), columns = list(id = colDef(name="ID"), season = colDef(name="Season"), team1 = colDef(name="Home Team"), team2 = colDef(name="Away Team"), bowler = colDef(name="Bowler"), bowling_team = colDef(name="Bowling Team"), bowling_points = colDef(name="Points")))
+```
